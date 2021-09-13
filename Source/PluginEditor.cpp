@@ -30,7 +30,7 @@ void SimpleEqAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (15.0f);
-    g.drawFittedText ("Hello World!", getLocalBounds(), juce::Justification::centred, 1);
+    g.drawFittedText ("You say goodbye and I say hello!", getLocalBounds(), juce::Justification::centred, 1);
 }
 
 void SimpleEqAudioProcessorEditor::resized()
