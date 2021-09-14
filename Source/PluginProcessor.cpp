@@ -176,8 +176,8 @@ bool SimpleEqAudioProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* SimpleEqAudioProcessor::createEditor()
 {
-    //return new SimpleEqAudioProcessorEditor (*this);
-    return new juce::GenericAudioProcessorEditor(*this);
+    return new SimpleEqAudioProcessorEditor (*this);
+    //return new juce::GenericAudioProcessorEditor(*this);
 }
 
 //==============================================================================
@@ -186,12 +186,20 @@ void SimpleEqAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     // You should use this method to store your parameters in the memory block.
     // You could do that either as raw data, or use the XML or ValueTree classes
     // as intermediaries to make it easy to save and load complex data.
+    juce::MemoryOutputStream mos(destData, true);
+    apvts.state.writeToStream(mos);
 }
 
 void SimpleEqAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     // You should use this method to restore your parameters from this memory block,
     // whose contents will have been created by the getStateInformation() call.
+    auto tree = juce::ValueTree::readFromData(data, sizeInBytes);
+    if (tree.isValid())
+    {
+        apvts.replaceState(tree);
+        updateFilters();
+    }
 }
 
 ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts){
@@ -209,18 +217,22 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts){
     return settings;
 }
 
-void SimpleEqAudioProcessor::updatePeakFilter(const ChainSettings &chainSettings){
-    auto peakCoefficients = juce::dsp::IIR::Coefficients<float>::makePeakFilter(getSampleRate(),
+Coefficients makePeakFilter(const ChainSettings& chainSettings, double sampleRate)
+{
+    return juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate,
                                                                 chainSettings.peakFreq,
                                                                 chainSettings.peakQuality,
                                                                 juce::Decibels::decibelsToGain(chainSettings.peakGainInDecibels));
+}
 
+void SimpleEqAudioProcessor::updatePeakFilter(const ChainSettings &chainSettings){
 
+    auto peakCoefficients = makePeakFilter(chainSettings, getSampleRate());
     updateCoefficients(leftChain.get<ChainPositions::Peak>().coefficients, peakCoefficients);
     updateCoefficients(rightChain.get<ChainPositions::Peak>().coefficients, peakCoefficients);
 }
 
-void SimpleEqAudioProcessor::updateCoefficients(Coefficients &old, const Coefficients &replacements){
+void updateCoefficients(Coefficients &old, const Coefficients &replacements){
     *old = *replacements;
 }
 
