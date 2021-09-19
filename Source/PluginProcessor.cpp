@@ -96,8 +96,11 @@ void SimpleEqAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
     juce::dsp::ProcessSpec spec;
+
     spec.maximumBlockSize = samplesPerBlock;
+    
     spec.numChannels = 1;
+    
     spec.sampleRate = sampleRate;
     leftChain.prepare(spec);
     rightChain.prepare(spec);
@@ -106,6 +109,14 @@ void SimpleEqAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     leftChannelFifo.prepare(samplesPerBlock);
     rightChannelFifo.prepare(samplesPerBlock);
+
+    osc.initialise([](float x) {return std::sin(x);});
+
+    spec.numChannels = getTotalNumOutputChannels();
+    osc.prepare(spec);
+    osc.setFrequency(440);
+
+
 }
 
 void SimpleEqAudioProcessor::releaseResources()
@@ -158,6 +169,16 @@ void SimpleEqAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     updateFilters();
 
     juce::dsp::AudioBlock<float> block(buffer);
+
+    /*buffer.clear();
+
+    for(int i = 0; i < buffer.getNumSamples(); ++i)
+    {
+        buffer.setSample(0, i, osc.processSample(0));
+    }
+
+    juce::dsp::ProcessContextReplacing<float> stereoContext(block);
+    osc.process(stereoContext);*/
 
     auto leftBlock = block.getSingleChannelBlock(0);
     auto rightBlock = block.getSingleChannelBlock(1);
@@ -220,6 +241,11 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts){
     settings.lowCutSlope = static_cast<Slope>(apvts.getRawParameterValue("LoCut Slope")->load());
     settings.highCutSlope = static_cast<Slope>(apvts.getRawParameterValue("HiCut Slope")->load());
 
+    settings.lowCutBypassed = apvts.getRawParameterValue("LoCut Bypassed")->load() > 0.5f;
+    settings.peakBypassed = apvts.getRawParameterValue("Peak Bypassed")->load() > 0.5f;
+    settings.highCutBypassed = apvts.getRawParameterValue("HiCut Bypassed")->load() > 0.5f;
+    
+
     return settings;
 }
 
@@ -234,6 +260,10 @@ Coefficients makePeakFilter(const ChainSettings& chainSettings, double sampleRat
 void SimpleEqAudioProcessor::updatePeakFilter(const ChainSettings &chainSettings){
 
     auto peakCoefficients = makePeakFilter(chainSettings, getSampleRate());
+
+    leftChain.setBypassed<ChainPositions::Peak>(chainSettings.peakBypassed);
+    rightChain.setBypassed<ChainPositions::Peak>(chainSettings.peakBypassed);
+    
     updateCoefficients(leftChain.get<ChainPositions::Peak>().coefficients, peakCoefficients);
     updateCoefficients(rightChain.get<ChainPositions::Peak>().coefficients, peakCoefficients);
 }
@@ -248,6 +278,9 @@ void SimpleEqAudioProcessor::updateLowCutFilters(const ChainSettings &chainSetti
     auto &leftLowCut = leftChain.get<ChainPositions::LowCut>();
     auto &rightLowCut = rightChain.get<ChainPositions::LowCut>();
 
+    leftChain.setBypassed<ChainPositions::LowCut>(chainSettings.lowCutBypassed);
+    rightChain.setBypassed<ChainPositions::LowCut>(chainSettings.lowCutBypassed);
+
     updateCutFilter(rightLowCut, cutCoefficients, chainSettings.lowCutSlope);
     updateCutFilter(leftLowCut, cutCoefficients, chainSettings.lowCutSlope);
 }
@@ -256,9 +289,12 @@ void SimpleEqAudioProcessor::updateHighCutFilters(const ChainSettings &chainSett
 {
     auto highCutCoefficients = makeHighCutFilter(chainSettings, getSampleRate());
     auto &leftHighCut = leftChain.get<ChainPositions::HighCut>();
-    updateCutFilter(leftHighCut, highCutCoefficients, chainSettings.highCutSlope);
-
     auto &rightHighCut = rightChain.get<ChainPositions::HighCut>();
+    
+    leftChain.setBypassed<ChainPositions::HighCut>(chainSettings.highCutBypassed);
+    rightChain.setBypassed<ChainPositions::HighCut>(chainSettings.highCutBypassed);
+    
+    updateCutFilter(leftHighCut, highCutCoefficients, chainSettings.highCutSlope);
     updateCutFilter(rightHighCut, highCutCoefficients, chainSettings.highCutSlope);
 }
 
@@ -319,6 +355,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEqAudioProcessor::crea
                                                             0));
     
     //juce::AudioParameterChoice()
+
+    layout.add(std::make_unique<juce::AudioParameterBool>("LoCut Bypassed", "LoCut Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Peak Bypassed", "Peak Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("HiCut Bypassed", "HiCut Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Analyzer Enabled", "Analyzer Enabled", true));
 
     return layout;
 }

@@ -21,32 +21,46 @@ enum FFTOrder
 template<typename BlockType>
 struct FFTDataGenerator
 {
-  void produceFFTDataForRendering(const juce::AudioBuffer<float>& audioData, const float negativeInfinity)
-  {
-    const auto fftSize = getFFTSize();
-
-    fftData.assign(fftData.size(), 0);
-    auto* readIndex = audioData.getReadPointer(0);
-    std::copy(readIndex, readIndex + fftSize, fftData.begin());
-
-    window->multiplyWithWindowingTable(fftData.data(), fftSize);
-
-    forwardFFT->performFrequencyOnlyForwardTransform(fftData.data());
-
-    int numBins = (int)fftSize/2;
-
-    for(int i = 0; i < numBins; ++i)
+   void produceFFTDataForRendering(const juce::AudioBuffer<float>& audioData, const float negativeInfinity)
     {
-      fftData[i] /= (float) numBins;
+        const auto fftSize = getFFTSize();
+        
+        fftData.assign(fftData.size(), 0);
+        auto* readIndex = audioData.getReadPointer(0);
+        std::copy(readIndex, readIndex + fftSize, fftData.begin());
+        
+        // first apply a windowing function to our data
+        window->multiplyWithWindowingTable (fftData.data(), fftSize);       // [1]
+        
+        // then render our FFT data..
+        forwardFFT->performFrequencyOnlyForwardTransform (fftData.data());  // [2]
+        
+        int numBins = (int)fftSize / 2;
+        
+        //normalize the fft values.
+        for( int i = 0; i < numBins; ++i )
+        {
+            auto v = fftData[i];
+//            fftData[i] /= (float) numBins;
+            if( !std::isinf(v) && !std::isnan(v) )
+            {
+                v /= float(numBins);
+            }
+            else
+            {
+                v = 0.f;
+            }
+            fftData[i] = v;
+        }
+        
+        //convert them to decibels
+        for( int i = 0; i < numBins; ++i )
+        {
+            fftData[i] = juce::Decibels::gainToDecibels(fftData[i], negativeInfinity);
+        }
+        
+        fftDataFifo.push(fftData);
     }
-
-    for(int i = 0; i < numBins; ++i)
-    {
-      fftData[i] = juce::Decibels::gainToDecibels(fftData[i], negativeInfinity);
-    }
-
-    fftDataFifo.push(fftData);
-  }
 
   void changeOrder(FFTOrder newOrder)
   {
@@ -116,7 +130,7 @@ struct AnalyzerPathGenerator
         {
             y = map(renderData[binNum]);
 
-            jassert( !std::isnan(y) && !std::isinf(y) );
+            //jassert( !std::isnan(y) && !std::isinf(y) );
 
             if( !std::isnan(y) && !std::isinf(y) )
             {
@@ -151,6 +165,11 @@ struct LookAndFeel : juce::LookAndFeel_V4
                             float rotaryStartAngle,
                             float rotaryEndAngle,
                             juce::Slider&) override;
+
+    void drawToggleButton (juce::Graphics &g, 
+                           juce::ToggleButton & toggleButton,
+                           bool shouldDrawButtonAsHighlighted,
+                           bool shouldDrawButtonAsDown) override;
 };
 
 struct RotarySliderWithLabels : juce::Slider
@@ -186,6 +205,31 @@ struct RotarySliderWithLabels : juce::Slider
       juce::String suffix;
 };
 
+struct PathProducer
+{
+  void process(juce::Rectangle<float> fftBounds, double sampleRate);
+  juce::Path getPath(){ return leftChannelFFTPath; }
+
+  PathProducer(SingleChannelSampleFifo<SimpleEqAudioProcessor::BlockType>& scsf):
+  leftChannelFifo(&scsf)
+  {
+    leftChannelFFTDataGenerator.changeOrder(FFTOrder::order2048);
+    monoBuffer.setSize(1, leftChannelFFTDataGenerator.getFFTSize());
+
+  }
+
+  private:
+    SingleChannelSampleFifo<SimpleEqAudioProcessor::BlockType>* leftChannelFifo;
+
+    juce::AudioBuffer<float> monoBuffer;
+
+    FFTDataGenerator<std::vector<float>> leftChannelFFTDataGenerator;
+
+    AnalyzerPathGenerator<juce::Path> pathProducer;
+
+    juce::Path leftChannelFFTPath;
+};
+
 struct ResponseCurveComponent: juce::Component,
 juce::AudioProcessorParameter::Listener,
 juce::Timer
@@ -201,6 +245,11 @@ juce::Timer
     void paint(juce::Graphics& g) override;
     void resized() override;
 
+    void toggleAnalysisEnablement(bool enabled)
+    {
+      shouldShowFFTAnalysis = enabled;
+    }
+
   private:
     SimpleEqAudioProcessor& audioProcessor;
     juce::Atomic<bool> parametersChanged {false};
@@ -215,20 +264,34 @@ juce::Timer
 
     juce::Rectangle<int> getAnalysisArea();
 
-    SingleChannelSampleFifo<SimpleEqAudioProcessor::BlockType>* leftChannelFifo;
+    PathProducer leftPathProducer, rightPathProducer;
 
-    juce::AudioBuffer<float> monoBuffer;
-
-    FFTDataGenerator<std::vector<float>> leftChannelFFTDataGenerator;
-
-    AnalyzerPathGenerator<juce::Path> pathProducer;
-
-    juce::Path leftChannelFFTPath;
+    bool shouldShowFFTAnalysis = true;
 };
 
 
 
 //==============================================================================
+struct PowerButton : juce::ToggleButton {};
+struct AnalyzerButton : juce::ToggleButton
+{
+  void resized() override
+  {
+    auto bounds = getLocalBounds();
+    auto insetRect = bounds.reduced(4);
+    randomPath.clear();
+
+    juce::Random r;
+        randomPath.startNewSubPath(insetRect.getX(),
+                                   insetRect.getY() + insetRect.getHeight()*r.nextFloat());
+        for (auto x = insetRect.getX() + 1; x < insetRect.getRight(); x+=2)
+        {
+            randomPath.lineTo(x,
+                              insetRect.getY() + insetRect.getHeight()*r.nextFloat());
+        }
+  }
+  juce::Path randomPath;
+};
 /**
 */
 class SimpleEqAudioProcessorEditor  : public juce::AudioProcessorEditor
@@ -268,7 +331,18 @@ private:
                 lowCutSlopeSliderAttachment,
                 highCutSlopeSliderAttachment;
 
+    PowerButton lowcutBypassButton, peakBypassButton, highcutBypassButton;
+    AnalyzerButton analyzerEnabledButton;
+
+    using ButtonAttachment = APVTS::ButtonAttachment;
+    ButtonAttachment lowcutBypassButtonAttachment,
+                     peakBypassButtonAttachment,
+                     highcutBypassButtonAttachment,
+                     analyzerEnabledButtonAttachment;
+
     std::vector<juce::Component*> getComps();
+
+    LookAndFeel lnf;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleEqAudioProcessorEditor)
 };
