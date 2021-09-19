@@ -25,7 +25,7 @@ void LookAndFeel::drawRotarySlider(juce::Graphics &g,
 
     auto enabled = slider.isEnabled();
 
-    g.setColour(enabled ? Colour(97u, 18u, 167u) : Colours::darkgrey);
+    g.setColour(enabled ? Colours::rebeccapurple : Colours::darkgrey);
     g.fillEllipse(bounds);
 
     g.setColour(enabled ? Colour(255u, 154u, 1u) : Colours::grey);
@@ -101,7 +101,7 @@ void LookAndFeel::drawToggleButton(juce::Graphics &g,
 
         PathStrokeType pst(2.f, PathStrokeType::JointStyle::curved);
 
-        auto color = toggleButton.getToggleState() ? Colours::dimgrey : Colour(0u, 172u, 1u);
+        auto color = toggleButton.getToggleState() ? Colours::red : Colour(0u, 172u, 1u);
 
         g.setColour(color);
 
@@ -111,7 +111,7 @@ void LookAndFeel::drawToggleButton(juce::Graphics &g,
     }
     else if (auto* analyzerButton = dynamic_cast<AnalyzerButton*>(&toggleButton))
     {
-        auto color = !toggleButton.getToggleState() ? Colours::dimgrey : Colour(0u, 172u, 1u);
+        auto color = !toggleButton.getToggleState() ? Colours::red : Colour(0u, 172u, 1u);
 
         g.setColour(color);
 
@@ -617,6 +617,8 @@ SimpleEqAudioProcessorEditor::SimpleEqAudioProcessorEditor (SimpleEqAudioProcess
     peakFreqSlider.labels.add({0.f, "20Hz"});
     peakFreqSlider.labels.add({1.f, "20kHz"});
 
+    peakFreqSlider.setSkewFactorFromMidPoint(0.002);
+
     peakGainSlider.labels.add({0.f, "-24dB"});
     peakGainSlider.labels.add({1.f, "24dB"});
 
@@ -626,8 +628,12 @@ SimpleEqAudioProcessorEditor::SimpleEqAudioProcessorEditor (SimpleEqAudioProcess
     lowCutFreqSlider.labels.add({0.f, "20Hz"});
     lowCutFreqSlider.labels.add({1.f, "20kHz"});
 
+    lowCutFreqSlider.setSkewFactorFromMidPoint(500);
+
     highCutFreqSlider.labels.add({0.f, "20Hz"});
     highCutFreqSlider.labels.add({1.f, "20kHz"});
+
+    highCutFreqSlider.setSkewFactorFromMidPoint(0.002);
 
     lowCutSlopeSlider.labels.add({0.f, "12dB/Oct"});
     lowCutSlopeSlider.labels.add({1.f, "48dB/Oct"});
